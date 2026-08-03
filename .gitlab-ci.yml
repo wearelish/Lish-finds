@@ -1,0 +1,258 @@
+# GitLab CI/CD Pipeline for LishFind
+# Alternative CI/CD configuration for GitLab users
+
+stages:
+  - test
+  - security
+  - build
+  - deploy
+  - notify
+
+variables:
+  DOCKER_DRIVER: overlay2
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "18"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CACHE_DIR: "$CI_PROJECT_DIR/.cache/npm"
+
+# Cache configuration
+cache:
+  paths:
+    - .cache/pip
+    - .cache/npm
+    - backend/__pycache__
+    - frontend/node_modules
+
+# Backend Tests
+backend-test:
+  stage: test
+  image: python:3.11
+  services:
+    - postgres:15
+    - redis:7-alpine
+  variables:
+    POSTGRES_DB: lishfind_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/lishfind_test"
+    REDIS_URL: "redis://redis:6379/0"
+    SECRET_KEY: "test-secret-key-for-gitlab-ci-32-characters"
+    ENVIRONMENT: "test"
+  before_script:
+    - cd backend
+    - pip install --cache-dir .cache/pip -r requirements.txt -r requirements-dev.txt
+    - python -m alembic upgrade head
+  script:
+    # Linting
+    - black --check --diff .
+    - isort --check-only --diff .
+    - flake8 . --count --statistics
+    - mypy . --ignore-missing-imports
+    
+    # Security
+    - safety check
+    - bandit -r . -f json -o bandit-report.json || true
+    
+    # Tests
+    - pytest --cov=. --cov-report=xml --cov-report=html --cov-fail-under=80 -v
+  coverage: '/TOTAL.+?(\d+\%)$/'
+  artifacts:
+    when: always
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: backend/coverage.xml
+      junit: backend/pytest-report.xml
+    paths:
+      - backend/htmlcov/
+      - backend/bandit-report.json
+    expire_in: 1 week
+
+# Frontend Tests
+frontend-test:
+  stage: test
+  image: node:18-alpine
+  before_script:
+    - cd frontend
+    - npm ci --cache .cache/npm --prefer-offline
+  script:
+    # Linting
+    - npx eslint . --ext .js,.html --format json --output-file eslint-report.json || true
+    - npx eslint . --ext .js,.html
+    
+    # HTML validation
+    - npx html-validate *.html
+    
+    # Accessibility
+    - npx pa11y-ci --reporter cli *.html || true
+  artifacts:
+    when: always
+    paths:
+      - frontend/eslint-report.json
+    expire_in: 1 week
+
+# Security Scanning
+security-scan:
+  stage: security
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - apk add --no-cache curl
+  script:
+    # Trivy security scan
+    - |
+      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+      trivy fs --format json --output trivy-report.json .
+      trivy fs --format table .
+  artifacts:
+    when: always
+    reports:
+      sast: trivy-report.json
+    expire_in: 1 week
+  allow_failure: true
+
+# Docker Build
+docker-build:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_BUILDKIT: 1
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    # Build backend
+    - |
+      docker build \
+        --cache-from $CI_REGISTRY_IMAGE/backend:latest \
+        --tag $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA \
+        --tag $CI_REGISTRY_IMAGE/backend:latest \
+        ./backend
+    
+    # Build frontend
+    - |
+      docker build \
+        --cache-from $CI_REGISTRY_IMAGE/frontend:latest \
+        --tag $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA \
+        --tag $CI_REGISTRY_IMAGE/frontend:latest \
+        ./frontend
+    
+    # Push images
+    - docker push $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/backend:latest
+    - docker push $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/frontend:latest
+  only:
+    - main
+    - develop
+    - tags
+
+# Deploy to Staging
+deploy-staging:
+  stage: deploy
+  image: alpine:latest
+  environment:
+    name: staging
+    url: https://lishfind-staging.example.com
+  before_script:
+    - apk add --no-cache curl
+  script:
+    # Deploy using webhook or API
+    - |
+      curl -X POST \
+        -H "Authorization: Bearer $STAGING_DEPLOY_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"ref":"'"$CI_COMMIT_SHA"'","environment":"staging"}' \
+        "$STAGING_DEPLOY_WEBHOOK"
+    
+    # Wait and health check
+    - sleep 60
+    - curl -f https://lishfind-staging-backend.example.com/health
+    - curl -f https://lishfind-staging-frontend.example.com/health
+  only:
+    - develop
+  needs:
+    - backend-test
+    - frontend-test
+    - docker-build
+
+# Deploy to Production
+deploy-production:
+  stage: deploy
+  image: alpine:latest
+  environment:
+    name: production
+    url: https://lishfind.example.com
+  before_script:
+    - apk add --no-cache curl
+  script:
+    # Create backup
+    - |
+      curl -X POST \
+        -H "Authorization: Bearer $PRODUCTION_BACKUP_TOKEN" \
+        "$PRODUCTION_BACKUP_WEBHOOK"
+    
+    # Deploy
+    - |
+      curl -X POST \
+        -H "Authorization: Bearer $PRODUCTION_DEPLOY_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"ref":"'"$CI_COMMIT_SHA"'","environment":"production"}' \
+        "$PRODUCTION_DEPLOY_WEBHOOK"
+    
+    # Health check
+    - sleep 120
+    - curl -f https://lishfind-backend.example.com/health
+    - curl -f https://lishfind.example.com/health
+  only:
+    - main
+    - tags
+  when: manual
+  needs:
+    - backend-test
+    - frontend-test
+    - security-scan
+    - docker-build
+
+# Performance Testing
+performance-test:
+  stage: deploy
+  image: grafana/k6:latest
+  script:
+    - k6 run --out json=performance-results.json tests/performance/load-test.js
+  artifacts:
+    when: always
+    paths:
+      - performance-results.json
+    expire_in: 1 week
+  only:
+    - main
+    - develop
+  allow_failure: true
+
+# Notification
+notify:
+  stage: notify
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - |
+      if [ "$CI_JOB_STATUS" = "success" ]; then
+        MESSAGE="✅ LishFind pipeline succeeded for $CI_COMMIT_REF_NAME"
+      else
+        MESSAGE="❌ LishFind pipeline failed for $CI_COMMIT_REF_NAME"
+      fi
+      
+      # Send to Slack
+      if [ -n "$SLACK_WEBHOOK" ]; then
+        curl -X POST -H 'Content-type: application/json' \
+          --data '{"text":"'"$MESSAGE"'"}' \
+          "$SLACK_WEBHOOK"
+      fi
+  when: always
+  only:
+    - main
+    - develop

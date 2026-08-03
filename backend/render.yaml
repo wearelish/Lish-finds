@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: lishfind-backend
+    env: python
+    plan: free
+    buildCommand: |
+      cd backend
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      cd backend
+      python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DEBUG
+        value: false
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lishfind-db
+          property: connectionString
+      - key: AI_PROVIDER
+        value: disabled
+      - key: CORS_ORIGINS
+        value: "https://your-frontend-domain.vercel.app,https://localhost:3000"
+      - key: ALLOWED_HOSTS
+        value: "your-backend.onrender.com,localhost"
+      - key: STORAGE_TYPE
+        value: local
+      - key: MAPS_PROVIDER
+        value: nominatim
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 120
+      - key: CACHE_TTL_SECONDS
+        value: 3600
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_FORMAT
+        value: json
+
+databases:
+  - name: lishfind-db
+    databaseName: lishfind
+    user: lishfind_user
+    plan: free

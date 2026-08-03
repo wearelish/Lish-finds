@@ -1,0 +1,117 @@
+# Docker ignore file for LishFind Backend
+# Excludes unnecessary files from Docker build context
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation
+docs/_build/
+.readthedocs.yml
+
+# Database files (should use external DB in production)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+log_*
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Development files
+.env.dev
+.env.local
+docker-compose.override.yml
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Backup files
+*.bak
+*.orig
+
+# Redis dump files
+dump.rdb
+
+# Alembic
+alembic.ini
+
+# Uploads (should use external storage in production)
+uploads/
+static/uploads/
+
+# Pre-commit hooks
+.pre-commit-config.yaml
+
+# README and docs (not needed in container)
+README.md
+LICENSE
+CHANGELOG.md
+docs/
+
+# Docker files (don't include in build context)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+Jenkinsfile

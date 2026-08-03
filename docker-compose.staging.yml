@@ -1,0 +1,128 @@
+# Docker Compose for LishFind - Staging Environment
+# Testing environment similar to production but with debug capabilities
+
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: lishfind-backend-staging
+    ports:
+      - "8001:8000"
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    environment:
+      - ENVIRONMENT=staging
+      - DATABASE_URL=postgresql+asyncpg://lishfind:${DB_PASSWORD:-staging123}@db:5432/lishfind_staging
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./backend/.env.staging
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: lishfind-frontend-staging
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: lishfind-db-staging
+    environment:
+      - POSTGRES_DB=lishfind_staging
+      - POSTGRES_USER=lishfind
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-staging123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init_scripts:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"  # Exposed for debugging
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lishfind -d lishfind_staging"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: lishfind-redis-staging
+    ports:
+      - "6379:6379"  # Exposed for debugging
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # Optional: Database admin interface for staging
+  adminer:
+    image: adminer:4.8.1
+    container_name: lishfind-adminer-staging
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=db
+      - ADMINER_DESIGN=galkaev
+    depends_on:
+      - db
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    profiles:
+      - admin
+
+volumes:
+  postgres_data:
+    name: lishfind-postgres-staging
+  redis_data:
+    name: lishfind-redis-staging
+  backend_uploads:
+    name: lishfind-uploads-staging
+  backend_logs:
+    name: lishfind-logs-staging
+
+networks:
+  lishfind-network:
+    name: lishfind-staging
+    driver: bridge

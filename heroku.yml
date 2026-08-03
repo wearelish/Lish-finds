@@ -1,0 +1,14 @@
+# Heroku Configuration for LishFind Backend
+# Deploy using Docker container
+
+build:
+  docker:
+    web: backend/Dockerfile
+    
+release:
+  image: web
+  command:
+    - python -m alembic upgrade head
+
+run:
+  web: python -m uvicorn main:app --host 0.0.0.0 --port $PORT

@@ -1,0 +1,394 @@
+# LishFind CD Pipeline
+# Continuous Deployment workflow for automated deployment to different environments
+
+name: CD Pipeline
+
+on:
+  push:
+    branches:
+      - main      # Deploy to production
+      - develop   # Deploy to staging
+    tags:
+      - 'v*'      # Deploy releases
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}-backend
+  IMAGE_NAME_FRONTEND: ${{ github.repository }}-frontend
+
+jobs:
+  # Determine deployment environment
+  setup:
+    name: Setup Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      deploy: ${{ steps.env.outputs.deploy }}
+      version: ${{ steps.env.outputs.version }}
+    
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "environment=none" >> $GITHUB_OUTPUT
+            echo "deploy=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set version
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+  # Build and Push Docker Images
+  build-images:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    needs: setup
+    if: needs.setup.outputs.deploy == 'true'
+    
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata (backend)
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+      
+      - name: Extract metadata (frontend)
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FRONTEND }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+      
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          target: production
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.setup.outputs.version }}
+      
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          target: production
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [setup, build-images]
+    if: needs.setup.outputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://lishfind-staging.onrender.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Deploy to Railway (Staging)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_STAGING }}
+        run: |
+          # Install Railway CLI
+          curl -fsSL "https://railway.app/install.sh" | sh
+          
+          # Deploy to Railway
+          railway login --token $RAILWAY_TOKEN
+          railway environment staging
+          railway up --detach
+      
+      - name: Deploy to Render (Staging)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID_BACKEND: ${{ secrets.RENDER_SERVICE_ID_BACKEND_STAGING }}
+          RENDER_SERVICE_ID_FRONTEND: ${{ secrets.RENDER_SERVICE_ID_FRONTEND_STAGING }}
+        run: |
+          # Deploy backend to Render
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID_BACKEND/deploys" \
+            -d '{"clearCache": false}'
+          
+          # Deploy frontend to Render
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID_FRONTEND/deploys" \
+            -d '{"clearCache": false}'
+      
+      - name: Run staging health check
+        run: |
+          echo "Waiting for deployment to complete..."
+          sleep 120
+          
+          # Health check
+          curl -f https://lishfind-backend-staging.onrender.com/health
+          curl -f https://lishfind-frontend-staging.onrender.com/health
+      
+      - name: Run smoke tests
+        run: |
+          # Basic API smoke tests
+          curl -f https://lishfind-backend-staging.onrender.com/api/v1/health
+          curl -f https://lishfind-backend-staging.onrender.com/docs
+          
+          # Frontend smoke test
+          curl -f https://lishfind-frontend-staging.onrender.com/
+
+  # Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [setup, build-images]
+    if: needs.setup.outputs.environment == 'production' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    environment:
+      name: production
+      url: https://lishfind.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Create deployment backup
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL_PRODUCTION }}
+        run: |
+          echo "Creating pre-deployment backup..."
+          # This would run your backup script
+          # ./scripts/backup.sh
+      
+      - name: Deploy to Railway (Production)
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+        run: |
+          # Install Railway CLI
+          curl -fsSL "https://railway.app/install.sh" | sh
+          
+          # Deploy to Railway
+          railway login --token $RAILWAY_TOKEN
+          railway environment production
+          railway up --detach
+      
+      - name: Deploy to Render (Production)
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID_BACKEND: ${{ secrets.RENDER_SERVICE_ID_BACKEND_PRODUCTION }}
+          RENDER_SERVICE_ID_FRONTEND: ${{ secrets.RENDER_SERVICE_ID_FRONTEND_PRODUCTION }}
+        run: |
+          # Deploy backend to Render
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID_BACKEND/deploys" \
+            -d '{"clearCache": false}'
+          
+          # Deploy frontend to Render
+          curl -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID_FRONTEND/deploys" \
+            -d '{"clearCache": false}'
+      
+      - name: Deploy to Fly.io (Production)
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          # Install Fly CLI
+          curl -L https://fly.io/install.sh | sh
+          
+          # Deploy to Fly.io
+          flyctl deploy --remote-only
+      
+      - name: Deploy to Vercel (Frontend)
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          # Install Vercel CLI
+          npm install -g vercel
+          
+          # Deploy to Vercel
+          cd frontend
+          vercel --token $VERCEL_TOKEN --prod --yes
+      
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for production deployment to complete..."
+          sleep 180
+      
+      - name: Run production health check
+        run: |
+          # Health check with retries
+          for i in {1..5}; do
+            if curl -f https://api.lishfind.com/health; then
+              echo "Backend health check passed"
+              break
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 30
+          done
+          
+          for i in {1..5}; do
+            if curl -f https://lishfind.com/health; then
+              echo "Frontend health check passed"
+              break
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 30
+          done
+      
+      - name: Run production smoke tests
+        run: |
+          # Critical API endpoints
+          curl -f https://api.lishfind.com/api/v1/health
+          curl -f https://api.lishfind.com/docs
+          
+          # Frontend
+          curl -f https://lishfind.com/
+          
+          # Database connectivity (through API)
+          curl -f https://api.lishfind.com/api/v1/monitoring/status
+
+  # Post-deployment tasks
+  post-deployment:
+    name: Post-deployment Tasks
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+    
+    steps:
+      - name: Update monitoring dashboards
+        run: |
+          echo "Updating Grafana dashboards..."
+          # This would update your monitoring dashboards with new deployment info
+      
+      - name: Send deployment notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          # Slack notification
+          if [[ -n "$SLACK_WEBHOOK" ]]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{"text":"🚀 LishFind deployed to '"${{ needs.setup.outputs.environment }}"' - Version: '"${{ needs.setup.outputs.version }}"'"}' \
+              $SLACK_WEBHOOK
+          fi
+          
+          # Discord notification
+          if [[ -n "$DISCORD_WEBHOOK" ]]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{"content":"🚀 LishFind deployed to '"${{ needs.setup.outputs.environment }}"' - Version: '"${{ needs.setup.outputs.version }}"'"}' \
+              $DISCORD_WEBHOOK
+          fi
+      
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "LishFind ${{ github.ref_name }}" \
+            --notes "Automated release for version ${{ github.ref_name }}" \
+            --latest
+
+  # Rollback capability
+  rollback:
+    name: Rollback
+    runs-on: ubuntu-latest
+    if: failure() && (needs.deploy-staging.result == 'failure' || needs.deploy-production.result == 'failure')
+    needs: [setup, deploy-staging, deploy-production]
+    environment:
+      name: ${{ needs.setup.outputs.environment }}
+    
+    steps:
+      - name: Rollback deployment
+        env:
+          RAILWAY_TOKEN: ${{ needs.setup.outputs.environment == 'production' && secrets.RAILWAY_TOKEN_PRODUCTION || secrets.RAILWAY_TOKEN_STAGING }}
+        run: |
+          echo "Deployment failed, initiating rollback..."
+          
+          # Install Railway CLI
+          curl -fsSL "https://railway.app/install.sh" | sh
+          
+          # Rollback to previous version
+          railway login --token $RAILWAY_TOKEN
+          railway environment ${{ needs.setup.outputs.environment }}
+          
+          # Get previous deployment and rollback
+          railway rollback --yes
+      
+      - name: Restore database backup
+        if: needs.setup.outputs.environment == 'production'
+        run: |
+          echo "Restoring database from backup if needed..."
+          # This would restore the pre-deployment backup if necessary
+      
+      - name: Send rollback notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          if [[ -n "$SLACK_WEBHOOK" ]]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{"text":"⚠️ LishFind deployment to '"${{ needs.setup.outputs.environment }}"' failed and was rolled back"}' \
+              $SLACK_WEBHOOK
+          fi

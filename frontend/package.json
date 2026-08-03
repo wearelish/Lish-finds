@@ -1,0 +1,17 @@
+{
+  "name": "lishfind-frontend",
+  "version": "1.0.0",
+  "description": "LishFind Frontend - AI-powered local search interface",
+  "main": "index.html",
+  "scripts": {
+    "dev": "python3 server.py",
+    "build": "echo 'Static site - no build required'",
+    "start": "python3 server.py"
+  },
+  "keywords": ["search", "ai", "local", "business", "directory"],
+  "author": "LishFind",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

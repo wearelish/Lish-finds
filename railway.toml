@@ -1,0 +1,21 @@
+# Railway Deployment Configuration for LishFind
+# Deploy backend and frontend as separate services
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+numReplicas = 1
+sleepApplication = false
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[env]
+# Environment variables will be set through Railway dashboard
+# Required variables:
+# - SECRET_KEY
+# - DATABASE_URL (PostgreSQL)
+# - REDIS_URL
+# - OPENAI_API_KEY (optional)
+# - GOOGLE_MAPS_API_KEY (optional)

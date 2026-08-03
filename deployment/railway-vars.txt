@@ -1,0 +1,37 @@
+# Railway Environment Variables Template
+# Copy these variables to your Railway project dashboard
+
+# Required Variables (Set these manually)
+SECRET_KEY=your-super-secret-key-minimum-32-characters-long
+CORS_ORIGINS=https://your-frontend-url.vercel.app
+ALLOWED_HOSTS=your-app-name.railway.app
+
+# Application Settings
+ENVIRONMENT=production
+DEBUG=false
+PORT=8000
+
+# Free Tier Configuration (Zero Cost)
+AI_PROVIDER=disabled
+MAPS_PROVIDER=nominatim
+EMAIL_ENABLED=false
+STORAGE_TYPE=local
+
+# Optional: Enhanced Features (Paid APIs)
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=sk-your-openai-api-key
+# MAPS_PROVIDER=google
+# GOOGLE_MAPS_API_KEY=AIza-your-google-maps-key
+
+# Security Settings
+HTTPS_ONLY=true
+SECURE_COOKIES=true
+RATE_LIMIT_PER_MINUTE=30
+MAX_LOGIN_ATTEMPTS=3
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Note: DATABASE_URL and REDIS_URL are automatically provided by Railway
+# when you add PostgreSQL and Redis services to your project

@@ -1,0 +1,41 @@
+# Render.com Environment Variables Template
+# These are automatically set by the render.yaml blueprint
+# Override if needed in the Render dashboard
+
+# Application Settings (Auto-configured)
+ENVIRONMENT=production
+DEBUG=false
+PORT=8000
+
+# Security (Update these)
+SECRET_KEY=auto-generated-by-render
+CORS_ORIGINS=https://lishfind-frontend.onrender.com
+ALLOWED_HOSTS=lishfind-backend.onrender.com
+
+# Free Tier Configuration
+AI_PROVIDER=disabled
+MAPS_PROVIDER=nominatim
+EMAIL_ENABLED=false
+STORAGE_TYPE=local
+
+# Database & Cache (Auto-configured by Render)
+# DATABASE_URL=postgresql://... (auto-set)
+# REDIS_URL=redis://... (auto-set)
+
+# Optional Upgrades (Add API keys for enhanced features)
+# AI_PROVIDER=openai
+# OPENAI_API_KEY=sk-your-api-key
+# MAPS_PROVIDER=google
+# GOOGLE_MAPS_API_KEY=AIza-your-key
+
+# Security Settings
+HTTPS_ONLY=true
+SECURE_COOKIES=true
+RATE_LIMIT_PER_MINUTE=30
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Note: Render.com automatically provisions all services
+# defined in render.yaml including PostgreSQL and Redis

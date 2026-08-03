@@ -1,0 +1,207 @@
+# Docker Compose for LishFind - Production Environment
+# Production-ready setup with PostgreSQL, Redis, and optimizations
+
+version: '3.8'
+
+services:
+  # Reverse Proxy / Load Balancer
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: lishfind-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: lishfind-backend-prod
+    expose:
+      - "8000"
+    volumes:
+      - backend_uploads:/app/uploads:rw
+      - backend_logs:/app/logs:rw
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://lishfind:${DB_PASSWORD}@db:5432/lishfind_prod
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./backend/.env.production
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: lishfind-frontend-prod
+    expose:
+      - "80"
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: lishfind-db-prod
+    environment:
+      - POSTGRES_DB=lishfind_prod
+      - POSTGRES_USER=lishfind
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS="--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init_scripts:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lishfind -d lishfind_prod"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c random_page_cost=1.1
+      -c temp_file_limit=2GB
+      -c log_min_duration_statement=1000ms
+      -c log_connections=on
+      -c log_disconnections=on
+      -c log_lock_waits=on
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: lishfind-redis-prod
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf:ro
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    command: redis-server /etc/redis/redis.conf
+
+  # Database backup service
+  db-backup:
+    image: postgres:15-alpine
+    container_name: lishfind-backup-prod
+    volumes:
+      - postgres_backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    environment:
+      - PGHOST=db
+      - PGDATABASE=lishfind_prod
+      - PGUSER=lishfind
+      - PGPASSWORD=${DB_PASSWORD}
+    depends_on:
+      - db
+    restart: "no"
+    networks:
+      - lishfind-network
+    profiles:
+      - backup
+
+volumes:
+  postgres_data:
+    name: lishfind-postgres-prod
+  postgres_backups:
+    name: lishfind-backups-prod
+  redis_data:
+    name: lishfind-redis-prod
+  backend_uploads:
+    name: lishfind-uploads-prod
+  backend_logs:
+    name: lishfind-logs-prod
+  nginx_logs:
+    name: lishfind-nginx-logs-prod
+
+networks:
+  lishfind-network:
+    name: lishfind-prod
+    driver: bridge

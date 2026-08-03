@@ -1,0 +1,147 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "LishFind Application Dashboard",
+    "description": "Comprehensive monitoring dashboard for LishFind application",
+    "tags": ["lishfind", "fastapi", "application"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Application Health",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "up{job=\"lishfind-backend\"}",
+            "legendFormat": "Application Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total{job=\"lishfind-backend\"}[5m])",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "yAxes": [
+          {"label": "Requests/sec", "min": 0}
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Response Time",
+        "type": "graph", 
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(http_request_duration_ms_bucket{job=\"lishfind-backend\"}[5m]))",
+            "legendFormat": "P50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(http_request_duration_ms_bucket{job=\"lishfind-backend\"}[5m]))",
+            "legendFormat": "P95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(http_request_duration_ms_bucket{job=\"lishfind-backend\"}[5m]))",
+            "legendFormat": "P99"
+          }
+        ],
+        "yAxes": [
+          {"label": "Milliseconds", "min": 0}
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "Error Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_request_errors_total{job=\"lishfind-backend\"}[5m]) / rate(http_requests_total{job=\"lishfind-backend\"}[5m]) * 100",
+            "legendFormat": "Error Rate %"
+          }
+        ],
+        "yAxes": [
+          {"label": "Percentage", "min": 0, "max": 100}
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 5,
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "system_cpu_usage_percent{job=\"lishfind-backend\"}",
+            "legendFormat": "CPU %"
+          },
+          {
+            "expr": "system_memory_usage_percent{job=\"lishfind-backend\"}",
+            "legendFormat": "Memory %"
+          },
+          {
+            "expr": "system_disk_usage_percent{job=\"lishfind-backend\"}",
+            "legendFormat": "Disk %"
+          }
+        ],
+        "yAxes": [
+          {"label": "Percentage", "min": 0, "max": 100}
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+      },
+      {
+        "id": 6,
+        "title": "Database Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "database_connection_pool_active{job=\"lishfind-backend\"}",
+            "legendFormat": "Active Connections"
+          },
+          {
+            "expr": "database_connection_pool_idle{job=\"lishfind-backend\"}",
+            "legendFormat": "Idle Connections"
+          }
+        ],
+        "yAxes": [
+          {"label": "Connections", "min": 0}
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+      },
+      {
+        "id": 7,
+        "title": "API Endpoints",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "topk(10, sum by (endpoint) (rate(http_requests_total{job=\"lishfind-backend\"}[5m])))",
+            "format": "table"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "version": 1
+  }
+}

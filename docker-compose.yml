@@ -1,0 +1,87 @@
+# Docker Compose for LishFind - Development Environment
+# Quick setup for local development with hot reload
+
+version: '3.8'
+
+services:
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: lishfind-backend-dev
+    ports:
+      - "8001:8000"
+    volumes:
+      # Mount source code for hot reload
+      - ./backend:/app
+      - backend_uploads:/app/uploads
+    environment:
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - DATABASE_URL=sqlite+aiosqlite:///./lishfind_demo.db
+      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: lishfind-frontend-dev
+    ports:
+      - "3000:80"
+    volumes:
+      # Mount source code for development
+      - ./frontend:/usr/share/nginx/html
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis cache (optional for development)
+  redis:
+    image: redis:7-alpine
+    container_name: lishfind-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+
+volumes:
+  backend_uploads:
+    name: lishfind-uploads-dev
+  redis_data:
+    name: lishfind-redis-dev
+
+networks:
+  lishfind-network:
+    name: lishfind-dev
+    driver: bridge

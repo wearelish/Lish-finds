@@ -1,0 +1,58 @@
+# Fly.io Configuration for LishFind Backend
+
+app = "lishfind-backend"
+primary_region = "sjc"  # San Jose, change as needed
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  ENVIRONMENT = "production"
+  PORT = "8000"
+  HOST = "0.0.0.0"
+  
+  # Database will be set via fly secrets
+  # fly secrets set DATABASE_URL="postgresql://..."
+  # fly secrets set SECRET_KEY="..."
+  # fly secrets set REDIS_URL="redis://..."
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+    timeout = "5s"
+    tls_skip_verify = false
+
+[machine]
+  auto_stop_machines = true
+  min_machines_running = 0
+  
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+[deploy]
+  release_command = "python -m alembic upgrade head"
+
+[[statics]]
+  guest_path = "/app/uploads"
+  url_prefix = "/uploads"
+
+# Uncomment for multiple regions
+# [[regions]]
+#   name = "sjc"
+#   primary = true
+# 
+# [[regions]]
+#   name = "iad"
