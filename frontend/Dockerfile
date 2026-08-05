@@ -2,7 +2,7 @@
 # Optimized Nginx setup for serving static HTML/CSS/JS
 
 # Build stage (for processing assets if needed)
-FROM node:18-alpine as builder
+FROM node:25-alpine as builder
 
 WORKDIR /app
 
