@@ -2,6 +2,7 @@
 AI service endpoints for testing and monitoring.
 
 Provides endpoints to test AI functionality and check provider status.
+Cloud-optimized for free tier deployment.
 """
 
 from typing import Dict, Any
@@ -10,8 +11,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from api.auth.dependencies import get_current_admin_user
-from services.ai_service import AIService
+from api.auth.dependencies import get_optional_current_user
+from models.user import User
+from services.ai_service import get_ai_service, AIService
 
 logger = structlog.get_logger(__name__)
 
@@ -69,10 +71,11 @@ class AIProviderStatus(BaseModel):
     summary="Get AI provider status",
     description="Get status of all available AI providers and connection tests.",
 )
-async def get_ai_status() -> AIProviderStatus:
+async def get_ai_status(
+    ai_service: AIService = Depends(get_ai_service)
+) -> AIProviderStatus:
     """Get AI provider status and availability."""
     
-    ai_service = AIService()
     status = await ai_service.get_provider_status()
     
     return AIProviderStatus(
@@ -86,18 +89,17 @@ async def get_ai_status() -> AIProviderStatus:
     "/test",
     response_model=AITestResponse,
     summary="Test AI generation",
-    description="Test AI text generation with custom prompt (admin only).",
+    description="Test AI text generation with custom prompt. Available for all users in free tier.",
 )
 async def test_ai_generation(
     test_request: AITestRequest,
-    current_user=Depends(get_current_admin_user)
+    ai_service: AIService = Depends(get_ai_service),
+    current_user: User = Depends(get_optional_current_user)
 ) -> AITestResponse:
     """Test AI text generation."""
     
     try:
-        ai_service = AIService()
-        
-        # Generate response
+        # Generate response using the AI service
         response_text = await ai_service.generate_text(
             prompt=test_request.prompt,
             system_prompt=test_request.system_prompt,
@@ -110,7 +112,7 @@ async def test_ai_generation(
         
         logger.info(
             "AI test generation successful",
-            user_id=current_user.id,
+            user_id=current_user.id if current_user else "anonymous",
             prompt_length=len(test_request.prompt),
             response_length=len(response_text),
             provider=provider_status.get("provider")
@@ -127,7 +129,7 @@ async def test_ai_generation(
     except Exception as e:
         logger.error(
             "AI test generation failed",
-            user_id=current_user.id,
+            user_id=current_user.id if current_user else "anonymous",
             error=str(e),
             exc_info=True
         )
@@ -146,18 +148,21 @@ async def test_ai_generation(
     summary="AI service health check",
     description="Quick health check for AI service availability.",
 )
-async def ai_health_check() -> Dict[str, Any]:
+async def ai_health_check(
+    ai_service: AIService = Depends(get_ai_service)
+) -> Dict[str, Any]:
     """Quick AI service health check."""
     
     try:
-        ai_service = AIService()
         connection_status = await ai_service.test_ai_connection()
         
         if connection_status.get("available"):
             return {
                 "status": "healthy",
                 "provider": connection_status.get("provider"),
-                "connection_test": connection_status.get("connection_test", False)
+                "connection_test": connection_status.get("connection_test", False),
+                "message": connection_status.get("message", "AI service operational"),
+                "features": connection_status.get("features", {})
             }
         else:
             return {
