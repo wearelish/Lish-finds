@@ -84,7 +84,7 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1", "--log-level", "info"]
 
 # Lightweight Stage (for minimal deployments)
-FROM python:3.11-alpine as lightweight
+FROM python:3.14-alpine as lightweight
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
