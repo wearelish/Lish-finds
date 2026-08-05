@@ -133,7 +133,7 @@ jobs:
           fail_ci_if_error: false
       
       - name: Upload test results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: backend-test-results
@@ -189,7 +189,7 @@ jobs:
           echo "Frontend build completed successfully"
       
       - name: Upload frontend artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-build
           path: frontend/
@@ -331,7 +331,7 @@ jobs:
           k6 run --out json=performance-results.json tests/performance/load-test.js || true
       
       - name: Upload performance results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
           name: performance-results
           path: performance-results.json
