@@ -1,54 +1,131 @@
-# Docker Compose for LishFind - Development Environment
-# Quick setup for local development with hot reload
+# LishFind Docker Compose - Development Environment
+# Complete containerized setup with PostgreSQL, Redis, and full observability
 
 version: '3.8'
 
 services:
-  # Backend API
+  # PostgreSQL Database with PostGIS
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: lishfind-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: lishfind
+      POSTGRES_USER: lishfind
+      POSTGRES_PASSWORD: lishfind_secure_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/database/init_scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lishfind -d lishfind"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Redis Cache with Persistence
+  redis:
+    image: redis:7-alpine
+    container_name: lishfind-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - lishfind-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # LishFind Backend API
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
       target: development
-    container_name: lishfind-backend-dev
+    container_name: lishfind-backend
+    restart: unless-stopped
     ports:
-      - "8001:8000"
+      - "8001:8001"
+    environment:
+      # Application
+      DEBUG: "true"
+      ENVIRONMENT: "development"
+      HOST: "0.0.0.0"
+      PORT: "8001"
+      
+      # Database - PostgreSQL for production-like setup
+      DATABASE_URL: "postgresql://lishfind:lishfind_secure_password@db:5432/lishfind"
+      DATABASE_POOL_SIZE: "10"
+      DATABASE_MAX_OVERFLOW: "20"
+      
+      # Cache
+      REDIS_URL: "redis://redis:6379/0"
+      CACHE_TTL_SECONDS: "3600"
+      
+      # Security
+      SECRET_KEY: "dev-docker-secret-key-change-in-production-very-long-and-secure"
+      CORS_ORIGINS: "http://localhost:3000,http://frontend:80,http://127.0.0.1:3000"
+      ALLOWED_HOSTS: "localhost,backend,127.0.0.1"
+      
+      # Services
+      AI_PROVIDER: "disabled"
+      EMAIL_ENABLED: "false"
+      STORAGE_TYPE: "local"
+      MAPS_PROVIDER: "nominatim"
+      
+      # Performance
+      RATE_LIMIT_PER_MINUTE: "200"
+      RATE_LIMIT_BURST: "300"
+      LOG_LEVEL: "INFO"
+      GZIP_COMPRESSION: "true"
+      
     volumes:
-      # Mount source code for hot reload
       - ./backend:/app
       - backend_uploads:/app/uploads
-    environment:
-      - DEBUG=true
-      - ENVIRONMENT=development
-      - DATABASE_URL=sqlite+aiosqlite:///./lishfind_demo.db
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - ./backend/.env
+      - backend_logs:/app/logs
     depends_on:
-      - redis
-    restart: unless-stopped
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - lishfind-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  # Frontend
+  # LishFind Frontend
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       target: development
-    container_name: lishfind-frontend-dev
+    container_name: lishfind-frontend
+    restart: unless-stopped
     ports:
       - "3000:80"
+    environment:
+      API_BASE_URL: "http://localhost:8001"
+      NODE_ENV: "development"
     volumes:
-      # Mount source code for development
-      - ./frontend:/usr/share/nginx/html
-    restart: unless-stopped
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      backend:
+        condition: service_healthy
     networks:
       - lishfind-network
     healthcheck:
@@ -57,31 +134,54 @@ services:
       timeout: 10s
       retries: 3
 
-  # Redis cache (optional for development)
-  redis:
-    image: redis:7-alpine
-    container_name: lishfind-redis-dev
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+  # Nginx Reverse Proxy (Optional - for production-like setup)
+  nginx:
+    image: nginx:alpine
+    container_name: lishfind-nginx
     restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
     networks:
       - lishfind-network
+    profiles:
+      - proxy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
 
+# Persistent Volumes
 volumes:
-  backend_uploads:
-    name: lishfind-uploads-dev
+  postgres_data:
+    name: lishfind-postgres-data
+    driver: local
   redis_data:
-    name: lishfind-redis-dev
+    name: lishfind-redis-data
+    driver: local
+  backend_uploads:
+    name: lishfind-uploads
+    driver: local
+  backend_logs:
+    name: lishfind-logs
+    driver: local
+  nginx_logs:
+    name: lishfind-nginx-logs
+    driver: local
 
+# Networks
 networks:
   lishfind-network:
-    name: lishfind-dev
+    name: lishfind-network
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1

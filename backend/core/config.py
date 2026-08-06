@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     REDIS_URL: Optional[str] = Field(default=None, env="REDIS_URL")
     CACHE_TTL_SECONDS: int = Field(default=3600, env="CACHE_TTL_SECONDS")  # 1 hour default
     
-    # AI Providers
-    AI_PROVIDER: str = Field(default="openai", env="AI_PROVIDER")  # openai or gemini
+    # Disable expensive features for free tier
+    AI_PROVIDER: str = Field(default="disabled", env="AI_PROVIDER")  # disabled, openai, gemini
     
     # OpenAI Configuration
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")

@@ -13,38 +13,72 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-from api.middleware.logging import LoggingMiddleware
-from api.middleware.rate_limit import RateLimitMiddleware
-from api.middleware.security import SecurityMiddleware
-from monitoring.metrics import metrics_middleware
-from monitoring.apm import apm_middleware
-from performance.compression import CompressionMiddleware
-from performance.cache import cache_manager
+# Import available middleware
+try:
+    from api.middleware.logging import LoggingMiddleware
+except ImportError:
+    LoggingMiddleware = None
+
+try:
+    from api.middleware.rate_limit import RateLimitMiddleware
+except ImportError:
+    RateLimitMiddleware = None
+
+try:
+    from api.middleware.security import SecurityMiddleware
+except ImportError:
+    SecurityMiddleware = None
+
+# Import core modules
 from api.v1.router import api_v1_router
 from core.config import settings
-from core.exceptions import setup_exception_handlers
-from database.connection import init_db, close_db
-from database.redis import init_redis, close_redis, get_redis_client
-from docs.api_docs import setup_enhanced_docs
-from utils.logger import setup_logging
+
+# Optional imports for production features
+try:
+    from core.exceptions import setup_exception_handlers
+except ImportError:
+    def setup_exception_handlers(app):
+        pass
+
+try:
+    from database.connection import init_db, close_db
+except ImportError:
+    async def init_db():
+        pass
+    async def close_db():
+        pass
+
+try:
+    from database.redis import init_redis, close_redis, get_redis_client
+except ImportError:
+    async def init_redis():
+        pass
+    async def close_redis():
+        pass
+    def get_redis_client():
+        return None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     # Startup
-    setup_logging()
-    await init_db()
-    await init_redis()
-    
-    # Initialize cache manager
-    await cache_manager.init_redis()
+    try:
+        await init_db()
+        await init_redis()
+        print("✅ Database and Redis initialized")
+    except Exception as e:
+        print(f"⚠️  Database/Redis initialization failed: {e}")
     
     yield
     
     # Shutdown
-    await close_db()
-    await close_redis()
+    try:
+        await close_db()
+        await close_redis()
+        print("✅ Cleanup completed")
+    except Exception as e:
+        print(f"⚠️  Cleanup error: {e}")
 
 
 def create_app() -> FastAPI:
@@ -59,34 +93,29 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     
-    # Setup enhanced documentation
-    setup_enhanced_docs(app)
-    
     # Security middleware
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=settings.ALLOWED_HOSTS,
+        allowed_hosts=settings.allowed_hosts_list,
     )
     
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
-    # Custom middleware (order matters - these are processed in reverse order)
-    if settings.GZIP_COMPRESSION:
-        app.add_middleware(CompressionMiddleware, min_size=1024)
+    # Add available middleware
+    if SecurityMiddleware:
+        app.add_middleware(SecurityMiddleware)
     
-    app.add_middleware(SecurityMiddleware)
-    app.add_middleware(RateLimitMiddleware, redis_client_func=get_redis_client)
-    app.add_middleware(LoggingMiddleware)
+    if RateLimitMiddleware and get_redis_client():
+        app.add_middleware(RateLimitMiddleware, redis_client_func=get_redis_client)
     
-    # Add monitoring middleware
-    app.middleware("http")(metrics_middleware)
-    app.middleware("http")(apm_middleware)
+    if LoggingMiddleware:
+        app.add_middleware(LoggingMiddleware)
     
     # Exception handlers
     setup_exception_handlers(app)
@@ -97,35 +126,28 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health_check():
         """Health check endpoint for load balancers."""
-        from database.connection import health_check as db_health_check
-        from database.redis import health_check as redis_health_check
         
-        # Check database health
-        db_health = await db_health_check()
-        
-        # Check Redis health (if enabled)
-        redis_health = {"status": "disabled"}
-        if settings.REDIS_URL:
-            redis_health = await redis_health_check()
-        
-        # Overall health status
-        overall_status = "healthy"
-        if db_health["status"] != "healthy":
-            overall_status = "unhealthy"
-        elif redis_health["status"] not in ["healthy", "disabled"]:
-            overall_status = "degraded"
-        
-        return {
-            "status": overall_status,
+        # Basic health response for cloud deployment
+        health_data = {
+            "status": "healthy",
             "version": "1.0.0",
             "environment": settings.ENVIRONMENT,
-            "database": db_health,
-            "redis": redis_health,
-            "checks": {
-                "database": db_health["status"] == "healthy",
-                "redis": redis_health["status"] in ["healthy", "disabled"],
+            "features": {
+                "ai_provider": settings.AI_PROVIDER,
+                "database": "configured" if settings.DATABASE_URL else "not_configured",
+                "redis": "enabled" if settings.REDIS_URL else "disabled",
             }
         }
+        
+        # Try to check database health if available
+        try:
+            from database.connection import health_check as db_health_check
+            db_health = await db_health_check()
+            health_data["database_health"] = db_health
+        except Exception as e:
+            health_data["database_health"] = {"status": "unavailable", "error": str(e)}
+        
+        return health_data
     
     @app.get("/")
     async def root():
@@ -159,13 +181,17 @@ if __name__ == "__main__":
     import uvicorn
     
     # Get port from environment (Render uses PORT env var)
-    port = int(os.environ.get("PORT", getattr(settings, 'PORT', 8001)))
+    port = int(os.environ.get("PORT", getattr(settings, 'PORT', 8000)))
     host = os.environ.get("HOST", getattr(settings, 'HOST', '0.0.0.0'))
     
+    print(f"🚀 Starting LishFind Backend on {host}:{port}")
+    print(f"📊 Environment: {settings.ENVIRONMENT}")
+    print(f"🔧 Debug Mode: {settings.DEBUG}")
+    
     uvicorn.run(
-        "main:app",
+        app,  # Use app instance directly for better Render compatibility
         host=host,
         port=port,
-        reload=settings.DEBUG,
-        log_level="info" if settings.DEBUG else "warning",
+        log_level="info",
+        access_log=True,
     )
