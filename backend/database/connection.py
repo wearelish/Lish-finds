@@ -54,12 +54,20 @@ def get_database_config():
         logger.info("Using SQLite database configuration")
     else:
         # PostgreSQL configuration for production
+        # Convert asyncpg URL to psycopg2 URL if needed
+        db_url = settings.DATABASE_URL
+        if db_url.startswith('postgresql+asyncpg://'):
+            db_url = db_url.replace('postgresql+asyncpg://', 'postgresql+psycopg2://')
+        elif db_url.startswith('postgresql://') and '+' not in db_url:
+            db_url = db_url.replace('postgresql://', 'postgresql+psycopg2://')
+        
         config.update({
             "poolclass": QueuePool,
             "pool_size": settings.DATABASE_POOL_SIZE,
             "max_overflow": settings.DATABASE_MAX_OVERFLOW,
             "pool_timeout": 30,
             "pool_reset_on_return": "commit",
+            "url": db_url
         })
         logger.info("Using PostgreSQL database configuration")
     
@@ -106,9 +114,12 @@ async def init_db() -> None:
         # Get database configuration
         db_config = get_database_config()
         
+        # Extract URL if provided in config
+        db_url = db_config.pop("url", settings.DATABASE_URL)
+        
         # Create async engine with configuration
         engine = create_async_engine(
-            settings.DATABASE_URL,
+            db_url,
             **db_config
         )
         
@@ -275,12 +286,11 @@ async def health_check() -> dict:
                 result = await conn.execute(text("""
                     SELECT 
                         current_database() as database_name,
-                        version() as version,
-                        pg_database_size(current_database()) as database_size
+                        version() as version
                 """))
                 db_info = result.fetchone()
             else:
-                db_info = {"database_name": "sqlite", "version": "SQLite", "database_size": "N/A"}
+                db_info = {"database_name": "sqlite", "version": "SQLite"}
         
         response_time = round((time.time() - start_time) * 1000, 2)
         

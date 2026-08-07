@@ -1,14 +1,13 @@
-# LishFind Backend - Render-Compatible Dependencies
+# LishFind Backend - Render-Compatible Dependencies (Python 3.11-3.12)
 
-# Core Framework - Using older compatible versions for Render
+# Core Framework - Using stable versions for Render
 fastapi==0.100.1
 uvicorn[standard]==0.23.2
 pydantic==1.10.12
 
-# Database
-sqlalchemy[asyncio]==2.0.19
+# Database - Using psycopg2-binary only (more stable than asyncpg)
+sqlalchemy[asyncio]==1.4.48
 alembic==1.11.1
-asyncpg==0.28.0
 psycopg2-binary==2.9.7
 
 # Authentication & Security
