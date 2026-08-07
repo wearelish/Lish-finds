@@ -9,7 +9,7 @@ pytest-html==4.1.1
 pytest-xdist==3.5.0
 
 # HTTP testing
-httpx==0.25.2
+httpx==0.28.1
 requests==2.31.0
 
 # Code quality and linting
