@@ -1,36 +1,36 @@
-# LishFind Backend - Render-Compatible Dependencies (Python 3.11-3.12)
+# LishFind Backend - Ultra-Stable Dependencies for Render
 
-# Core Framework - Using stable versions for Render
-fastapi==0.100.1
-uvicorn[standard]==0.23.2
-pydantic==1.10.12
+# Core Framework - Using proven stable versions
+fastapi==0.68.0
+uvicorn[standard]==0.15.0
+pydantic==1.8.2
 
-# Database - Using psycopg2-binary only (more stable than asyncpg)
-sqlalchemy[asyncio]==1.4.48
-alembic==1.11.1
-psycopg2-binary==2.9.7
+# Database - PostgreSQL only, no async complications
+sqlalchemy==1.4.23
+alembic==1.7.0
+psycopg2-binary==2.9.1
 
 # Authentication & Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-bcrypt==4.0.1
+python-multipart==0.0.5
+bcrypt==3.2.0
 
 # HTTP Client & Requests
-httpx==0.24.1
+httpx==0.24.0
 requests==2.31.0
 
 # Geolocation & Maps
-geopy==2.3.0
+geopy==2.2.0
 
 # File handling
-aiofiles==23.1.0
+aiofiles==0.7.0
 
 # Logging & Monitoring
-structlog==23.1.0
+structlog==21.1.0
 
 # Environment & Configuration
-python-dotenv==1.0.0
+python-dotenv==0.19.0
 
 # Production WSGI server
 gunicorn==20.1.0
