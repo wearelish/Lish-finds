@@ -10,7 +10,7 @@ pyyaml>=6.0
 jsonschema>=4.17.0
 
 # Cloud provider integrations (optional)
-boto3>=1.26.0  # AWS
+boto3>=1.43.66  # AWS
 google-cloud-secret-manager>=2.16.0  # GCP
 azure-keyvault-secrets>=4.7.0  # Azure
 
