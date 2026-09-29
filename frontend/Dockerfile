@@ -23,7 +23,7 @@ RUN if [ -f package.json ] && npm run build --silent 2>/dev/null; then \
     fi
 
 # Production stage
-FROM nginx:1.25-alpine as production
+FROM nginx:1.29-alpine as production
 
 # Install curl for health checks
 RUN apk add --no-cache curl
@@ -186,7 +186,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 CMD ["nginx", "-g", "daemon off;"]
 
 # Development stage (for local development with hot reload)
-FROM nginx:1.25-alpine as development
+FROM nginx:1.29-alpine as development
 
 # Install nodejs for development tools
 RUN apk add --no-cache nodejs npm curl
